@@ -1,0 +1,2 @@
+# Cowlar — Dependencias de Python
+# Servidor 100% autónomo con librería estándar de Python 3

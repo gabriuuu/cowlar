@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "broker": "nam1.cloud.thethings.network",
+  "port": 8883,
+  "use_tls": true,
+  "app_id": "cowlar-ganado-uets",
+  "api_key": "NNSXS.3SVIR4RHSTUSB5WZICAMXP4TA6YABOTKWD22FFY.2AO2FSDYA5AHY4K6KQFCIC2CJQXBX2S75SHEBH6JHDM3IMV5OKDQ",
+  "topic": "v3/+/devices/+/up",
+  "connect_now": true
+}
