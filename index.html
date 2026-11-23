@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0c120e">
+  <meta name="description" content="Cowlar — App de Monitoreo de Ganado para Vaqueros y Productores Agropecuarios.">
+  <title>Cowlar · Monitoreo de Ganado</title>
+
+  <!-- Leaflet Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Mensajes flotantes en pantalla -->
+  <div id="toast-container" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- ═══════════════════════════════════════════════
+       BARRA SUPERIOR (HEADER)
+       ═══════════════════════════════════════════════ -->
+  <header class="app-header">
+    <div class="brand-wrapper">
+      <div class="brand-icon" aria-hidden="true">🐮</div>
+      <div class="brand-titles">
+        <h1>Cowlar <span class="badge-lora">LoRaWAN</span></h1>
+        <p>Hacienda Nova Green · Ecuador</p>
+      </div>
+    </div>
+
+    <!-- Estado de Antena / Conectividad -->
+    <div class="header-status-group" aria-label="Estado del sistema">
+      <div class="status-pill" id="pill-gateway" title="Gateway Heltec HT-M7603">
+        <span class="status-dot" id="gateway-dot"></span>
+        <span id="gateway-status-text">HT-M7603 En Línea</span>
+      </div>
+      <div class="status-pill" title="Red The Things Network">
+        <span>☁️ <strong id="ttn-status-text">TTN Conectado</strong></span>
+      </div>
+      <div class="status-pill" title="Hora actual">
+        <span>🕒 <span id="clock-display">--:--:--</span></span>
+      </div>
+    </div>
+
+    <!-- Botones de Acción -->
+    <div class="header-actions">
+      <button class="btn btn-secondary btn-sm" id="btn-toggle-sim" onclick="toggleSimulation()"
+              title="Simular movimiento de vacas para demostración">
+        <span id="sim-icon">▶</span>
+        <span id="sim-text">Simular</span>
+      </button>
+      <button class="btn btn-primary btn-sm" onclick="exportCSV()" title="Descargar datos en Excel">
+        📥 CSV
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════════════════
+       PESTAÑAS DE COMPUTADORA (Escritorio / Laptop)
+       ═══════════════════════════════════════════════ -->
+  <nav class="nav-tabs" role="tablist" aria-label="Navegación de pestañas">
+    <button class="tab-btn active" role="tab" aria-selected="true"
+            aria-controls="tab-dashboard" onclick="switchTab('tab-dashboard')">
+      🗺️ Potrero en Vivo
+    </button>
+    <button class="tab-btn" role="tab" aria-selected="false"
+            aria-controls="tab-behavior" onclick="switchTab('tab-behavior')">
+      📊 Salud &amp; Pastoreo
+    </button>
+    <button class="tab-btn" role="tab" aria-selected="false"
+            aria-controls="tab-history" onclick="switchTab('tab-history')">
+      📋 Registro de Datos
+    </button>
+    <button class="tab-btn" role="tab" aria-selected="false"
+            aria-controls="tab-ttn" onclick="switchTab('tab-ttn')">
+      🛰️ Antena &amp; TTN
+    </button>
+    <button class="tab-btn" role="tab" aria-selected="false"
+            aria-controls="tab-simulator" onclick="switchTab('tab-simulator')">
+      🧪 Pruebas de Campo
+    </button>
+  </nav>
+
+  <!-- ═══════════════════════════════════════════════
+       CONTENIDO PRINCIPAL
+       ═══════════════════════════════════════════════ -->
+  <main class="main-container" id="main-content">
+
+    <!-- Alerta de Animal Fuera del Potrero -->
+    <div id="alert-banner" class="alert-banner" style="display:none;" role="alert">
+      <div class="alert-content">
+        <div class="alert-icon" aria-hidden="true">🚨</div>
+        <div>
+          <div class="alert-title" id="alert-title">¡ANIMAL FUERA DEL POTRERO!</div>
+          <div class="alert-desc" id="alert-desc">Una vaca ha cruzado el cerco virtual.</div>
+        </div>
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="dismissAlertBanner()">Revisado ✓</button>
+    </div>
+
+    <!-- ── Resumen Rápido del Rebaño (Fácil de entender) ── -->
+    <div class="metrics-row" role="region" aria-label="Resumen rápido">
+      <div class="metric-card">
+        <div class="metric-icon-box" style="color:var(--color-grazing);">🐄</div>
+        <div class="metric-info">
+          <h3>Mis Vacas</h3>
+          <div class="metric-value" id="kpi-total-cows">3</div>
+          <div class="metric-sub">En el potrero</div>
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon-box" style="color:var(--color-grazing);">🌿</div>
+        <div class="metric-info">
+          <h3>Comportamiento</h3>
+          <div class="metric-value" id="kpi-top-activity" style="font-size:16px;">Pastando</div>
+          <div class="metric-sub">Comiendo normal</div>
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon-box" style="color:var(--color-rumination);">🔋</div>
+        <div class="metric-info">
+          <h3>Batería</h3>
+          <div class="metric-value" id="kpi-avg-battery">86%</div>
+          <div class="metric-sub">Carga saludable</div>
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon-box" style="color:var(--color-rf);">📶</div>
+        <div class="metric-info">
+          <h3>Señal Radio</h3>
+          <div class="metric-value" style="font-size:16px;">Fuerte</div>
+          <div class="metric-sub">Llega al establo</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════
+         TAB 1 — POTRERO EN VIVO (MAPA + FICHA)
+         ════════════════════════════════════════ -->
+    <div id="tab-dashboard" class="tab-pane active" role="tabpanel">
+
+      <!-- Selector Táctil de Vacas (Tarjetas grandes para tocar con el pulgar) -->
+      <div class="cow-selector-bar" id="cow-selector-bar" aria-label="Selecciona una vaca">
+        <!-- Rellenado por app.js -->
+      </div>
+
+      <div class="dashboard-grid">
+
+        <!-- MAPA DEL POTRERO -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📍 Potrero 100 × 100 m</div>
+            <div class="flex gap-6">
+              <button class="btn btn-secondary btn-sm" onclick="toggleMapLayer()" title="Cambiar a vista satélite">
+                🛰️ Satélite
+              </button>
+              <button class="btn btn-secondary btn-sm" onclick="centerMapOnCurrentCow()" title="Ubicar vaca en el mapa">
+                🎯 Ubicar
+              </button>
+            </div>
+          </div>
+          <div class="map-container">
+            <div id="map" role="application" aria-label="Mapa de ubicación en vivo"></div>
+          </div>
+        </div>
+
+        <!-- FICHA CLARA DEL ANIMAL SELECCIONADO -->
+        <div class="telemetry-detail-column">
+
+          <!-- Identificación de la Vaca -->
+          <div class="vital-card">
+            <div class="vital-header">
+              <span class="vital-title">Vaca Seleccionada</span>
+              <span id="card-cow-badge" class="activity-badge-large badge-grazing">🌿 Pastando</span>
+            </div>
+            <div class="flex-center gap-12 mb-8">
+              <div style="font-size:32px; background:rgba(255,255,255,0.04);
+                          padding:8px 12px; border-radius:var(--radius-sm);" aria-hidden="true">🐄</div>
+              <div>
+                <h3 id="card-cow-name" class="fw-800 text-white" style="font-size:16.5px;">Manuela #104</h3>
+                <p id="card-cow-details" class="text-sm text-muted mt-4">Arete: EC-104 · Holstein Mestiza · 480 kg</p>
+                <p id="card-last-seen" class="text-xs mt-4" style="color:var(--color-grazing);">Señal: Hace unos segundos</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- ¿Qué está haciendo la vaca? (Inclinómetro ADXL345 simplificado) -->
+          <div class="vital-card">
+            <div class="vital-header">
+              <span class="vital-title">Salud del Cuello &amp; Rumia</span>
+              <span class="text-xs text-muted">Sensor ADXL345</span>
+            </div>
+            <div class="posture-display">
+              <div class="posture-graphic" id="posture-graphic" aria-label="Inclinómetro visual">
+                <div class="horizon-line" id="horizon-line"></div>
+                <div class="cow-head-icon" id="cow-head-icon" aria-hidden="true">🐮</div>
+              </div>
+              <div class="posture-metrics">
+                <div class="metric-line">
+                  <span class="label">Inclinación Cuello:</span>
+                  <span class="val" id="metric-pitch">-38.5° (Agachada)</span>
+                </div>
+                <div class="metric-line">
+                  <span class="label">Balance Lateral:</span>
+                  <span class="val" id="metric-roll">+3.2° (Nivelada)</span>
+                </div>
+                <div class="metric-line">
+                  <span class="label">Movimiento:</span>
+                  <span class="val" id="metric-motion">0.45 g (Tranquila)</span>
+                </div>
+              </div>
+            </div>
+            <p class="text-xs text-muted mt-8">
+              💡 <strong>En cristiano:</strong> Cuello agachado (&lt; -22°) indica que la vaca está comiendo pasto normalmente.
+            </p>
+          </div>
+
+          <!-- Batería del Collar -->
+          <div class="vital-card">
+            <div class="vital-header">
+              <span class="vital-title">Batería del Collar</span>
+              <span id="metric-batt-v" class="fw-700" style="color:var(--color-grazing); font-size:12.5px;">3.98 V</span>
+            </div>
+            <div class="battery-bar-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="88">
+              <div class="battery-bar-fill" id="battery-bar-fill" style="width:88%;"></div>
+            </div>
+            <div class="flex" style="justify-content:space-between; font-size:11.5px;">
+              <span id="metric-batt-pct" class="fw-700 text-white">88% Disponible</span>
+              <span class="text-muted">Autonomía: ~58 días</span>
+            </div>
+          </div>
+
+          <!-- Señal de Radio y Gateway -->
+          <div class="vital-card">
+            <div class="vital-header">
+              <span class="vital-title">Señal &amp; Gateway</span>
+              <span class="text-xs text-muted">Frecuencia US915</span>
+            </div>
+            <div class="rf-grid">
+              <div class="rf-box">
+                <div class="rf-lbl">Potencia Señal</div>
+                <div class="rf-val" id="metric-rssi">-82 dBm</div>
+              </div>
+              <div class="rf-box">
+                <div class="rf-lbl">Claridad (SNR)</div>
+                <div class="rf-val" id="metric-snr">+9.5 dB</div>
+              </div>
+              <div class="rf-box">
+                <div class="rf-lbl">Satélites GPS</div>
+                <div class="rf-val" id="metric-sats">9 Satélites</div>
+              </div>
+              <div class="rf-box">
+                <div class="rf-lbl">Gateway Conectado</div>
+                <div class="rf-val" id="metric-gateway" style="font-size:11.5px; color:var(--color-grazing);">HT-M7603</div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /telemetry-detail-column -->
+      </div><!-- /dashboard-grid -->
+    </div><!-- /tab-dashboard -->
+
+    <!-- ════════════════════════════════════════
+         TAB 2 — SALUD Y COMPORTAMIENTO
+         ════════════════════════════════════════ -->
+    <div id="tab-behavior" class="tab-pane" role="tabpanel">
+      <div style="display:grid; grid-template-columns:1fr; gap:14px; margin-bottom:14px;">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">🍩 ¿Cómo reparte el día la vaca? (Horas diarias)</div>
+          </div>
+          <div style="height:270px; display:flex; justify-content:center; align-items:center;">
+            <canvas id="chart-behavior-donut"></canvas>
+          </div>
+          <p class="text-xs text-muted mt-8" style="text-align:center;">
+            Monitoreo diario: ayuda al vaquero a saber si la vaca come lo suficiente o si muestra signos de celo o enfermedad.
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📈 Movimientos del Cuello en las Últimas Horas</div>
+          </div>
+          <div style="height:270px;">
+            <canvas id="chart-pitch-timeline"></canvas>
+          </div>
+          <p class="text-xs text-muted mt-8" style="text-align:center;">
+            Hacia abajo (-50°) = en el suelo pastando. Recta (0°) = descansando o caminando.
+          </p>
+        </div>
+      </div>
+
+      <!-- Consejos Veterinarios Fáciles -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">🔬 Indicadores de Bienestar para el Vaquero</div>
+        </div>
+        <div class="insights-grid">
+          <div class="insight-card" style="border-left-color: var(--color-grazing);">
+            <h4>🌿 Tiempo de Pastoreo</h4>
+            <p>Una vaca sana come entre <strong>7 y 9 horas diarias</strong>. Si come menos de 5 horas, revise el forraje o si tiene dolor.</p>
+          </div>
+          <div class="insight-card" style="border-left-color: var(--color-rumination);">
+            <h4>🐮 Rumia Efectiva</h4>
+            <p>El sensor detecta la masticación en reposo. Si la rumia baja de golpe, es aviso temprano de <strong>fiebre o acidosis</strong>.</p>
+          </div>
+          <div class="insight-card" style="border-left-color: var(--color-alert);">
+            <h4>🛡️ Cerco Virtual</h4>
+            <p>Si la vaca cruza los 100 metros del potrero delimitado, la alarma del collar y del celular avisa enseguida.</p>
+          </div>
+        </div>
+      </div>
+    </div><!-- /tab-behavior -->
+
+    <!-- ════════════════════════════════════════
+         TAB 3 — REGISTRO HISTÓRICO DE TRAMAS
+         ════════════════════════════════════════ -->
+    <div id="tab-history" class="tab-pane" role="tabpanel">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📋 Registro Histórico de Mensajes del Collar</div>
+          <button class="btn btn-primary btn-sm" onclick="exportCSV()">
+            📥 Descargar Hoja Excel (.CSV)
+          </button>
+        </div>
+        <div class="table-responsive">
+          <table class="cowlar-table" id="telemetry-table" aria-label="Historial de mensajes">
+            <thead>
+              <tr>
+                <th>Fecha / Hora</th>
+                <th>Collar</th>
+                <th>Animal</th>
+                <th>Latitud</th>
+                <th>Longitud</th>
+                <th>Actividad</th>
+                <th>Inclinación</th>
+                <th>Batería</th>
+                <th>Señal LoRa</th>
+                <th>Cerco</th>
+              </tr>
+            </thead>
+            <tbody id="telemetry-table-body">
+              <!-- Rellenado por app.js -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div><!-- /tab-history -->
+
+    <!-- ════════════════════════════════════════
+         TAB 4 — ENLACE TTN & MQTT
+         ════════════════════════════════════════ -->
+    <div id="tab-ttn" class="tab-pane" role="tabpanel">
+      <div style="display:grid; grid-template-columns:1fr; gap:14px;">
+
+        <!-- Conexión Directa MQTT -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📡 Conexión a la Nube TTN por MQTT</div>
+            <span id="mqtt-badge" class="badge badge-secondary">🔴 Desconectado</span>
+          </div>
+
+          <p class="text-sm text-muted mb-12">
+            La conexión directa por MQTT recibe los datos de las vacas al instante desde la nube de The Things Network sin abrir puertos en el router.
+          </p>
+
+          <div class="form-panel">
+            <div class="form-row mb-12">
+              <div class="form-group">
+                <label class="form-label" for="mqtt-broker-input">Servidor TTN</label>
+                <input type="text" id="mqtt-broker-input" class="form-control"
+                       value="nam1.cloud.thethings.network" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="mqtt-port-input">Puerto Seguro</label>
+                <input type="number" id="mqtt-port-input" class="form-control" value="8883">
+              </div>
+            </div>
+
+            <div class="form-group mb-12">
+              <label class="form-label" for="mqtt-appid-input">ID de la Aplicación en TTN</label>
+              <input type="text" id="mqtt-appid-input" class="form-control"
+                     value="cowlar-ganado-uets" autocomplete="off" spellcheck="false">
+            </div>
+
+            <div class="form-group mb-12">
+              <label class="form-label" for="mqtt-apikey-input">Clave API de TTN (API Key)</label>
+              <div class="input-group">
+                <input type="password" id="mqtt-apikey-input" class="form-control form-control-mono"
+                       placeholder="Pega aquí la clave NNSXS.XXXX..." autocomplete="new-password" spellcheck="false">
+                <button type="button" class="btn btn-ghost btn-icon btn-sm" onclick="toggleApiKeyVisibility()"
+                        title="Ver / Ocultar Clave">👁️</button>
+              </div>
+              <div class="form-hint mt-4" id="apikey-hint">
+                Se obtiene en TTN: <strong>Integrations › MQTT › Generate new API key</strong>
+              </div>
+            </div>
+
+            <div class="flex gap-8">
+              <button class="btn btn-primary flex-1" onclick="saveAndConnectMQTT()" id="btn-mqtt-connect">
+                🚀 Conectar por MQTT
+              </button>
+              <button class="btn btn-ghost btn-sm" onclick="disconnectMQTT()" id="btn-mqtt-disconnect">
+                ⏹ Detener
+              </button>
+            </div>
+          </div>
+
+          <!-- Métricas en vivo -->
+          <div class="mqtt-stats-grid mt-12">
+            <div class="mqtt-stat-box">
+              <div class="mqtt-stat-label">Mensajes Recibidos</div>
+              <div class="mqtt-stat-value" id="mqtt-msg-count">0</div>
+            </div>
+            <div class="mqtt-stat-box">
+              <div class="mqtt-stat-label">Último Mensaje</div>
+              <div class="mqtt-stat-value" style="font-size:12.5px;" id="mqtt-last-time">—</div>
+            </div>
+          </div>
+
+          <div class="status-text-inline mt-8" id="mqtt-status-inline">
+            <span>ℹ️</span>
+            <span id="mqtt-status-detail">Esperando conexión...</span>
+          </div>
+        </div>
+
+        <!-- Código Decodificador -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">⚙️ Decodificador de Mensajes (Payload Formatter)</div>
+            <button class="btn btn-secondary btn-sm" onclick="copyPayloadFormatter()">
+              📋 Copiar Código
+            </button>
+          </div>
+
+          <p class="text-sm text-muted mb-8">
+            Pega este código en la consola TTN para traducir los bytes que envía el Heltec V4 a números normales:
+          </p>
+
+          <div class="code-box" id="ttn-payload-code">function decodeUplink(input) {
+  var b = input.bytes;
+
+  // Trama 14 bytes · Heltec ESP32-S3 V4 + ADXL345 + GPS L76K
+  var lat    = (b[0]|(b[1]<<8)|(b[2]<<16)|(b[3]<<24)) / 1e6;
+  var lng    = (b[4]|(b[5]<<8)|(b[6]<<16)|(b[7]<<24)) / 1e6;
+  var pitch  = ((b[8]<<8)|b[9]) / 10.0;
+  var roll   = ((b[10]<<8)|b[11]) / 10.0;
+  var motion = b[12] / 100.0;
+  var batt_v = b[13] / 50.0;
+  var batt_pct = Math.min(100, Math.max(0, Math.round((batt_v - 3.2) / (4.15 - 3.2) * 100)));
+
+  var activity = "Reposo";
+  if (motion > 0.7)              activity = "Caminando";
+  else if (pitch <= -22.0)       activity = "Pastando";
+  else if (pitch > -18 && motion >= 0.08) activity = "Rumia";
+
+  return { data: { lat, lng, pitch, roll, motion, batt_v, batt_pct, activity } };
+}</div>
+
+          <div class="divider"></div>
+
+          <div class="guide-steps">
+            <div class="guide-step">
+              <span class="step-num">1</span>
+              <span>Entra en <strong>console.cloud.thethings.network</strong> a la app <code>cowlar-ganado-uets</code>.</span>
+            </div>
+            <div class="guide-step">
+              <span class="step-num">2</span>
+              <span>Entra a <strong>Payload formatters › Uplink</strong> y pega el código anterior.</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div><!-- /tab-ttn -->
+
+    <!-- ════════════════════════════════════════
+         TAB 5 — PRUEBAS DE CAMPO Y SIMULADOR
+         ════════════════════════════════════════ -->
+    <div id="tab-simulator" class="tab-pane" role="tabpanel">
+      <div class="sim-grid">
+
+        <!-- Botones de Escenarios para la Sustentación -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">🧪 Banco de Pruebas Rápidas</div>
+          </div>
+          <p class="text-sm text-muted mb-8">
+            Toca cualquiera de estos botones para demostrarle al tutor de tesis cómo reacciona Cowlar en cada caso:
+          </p>
+
+          <div class="sim-actions-grid">
+            <div class="action-card-btn" onclick="triggerScenario('normal')">
+              <div class="btn-icon">🌿</div>
+              <div class="btn-label">Vaca Comiendo</div>
+              <div class="btn-desc">Dentro del potrero 100x100m.</div>
+            </div>
+
+            <div class="action-card-btn" onclick="triggerScenario('escape')">
+              <div class="btn-icon">🚨</div>
+              <div class="btn-label">Escape de Cerco</div>
+              <div class="btn-desc">Dispara alarma sonora y visual.</div>
+            </div>
+
+            <div class="action-card-btn" onclick="triggerScenario('low_battery')">
+              <div class="btn-icon">🪫</div>
+              <div class="btn-label">Batería Agotándose</div>
+              <div class="btn-desc">Baja a &lt; 3.3V para probar aviso.</div>
+            </div>
+
+            <div class="action-card-btn" onclick="triggerScenario('agitated')">
+              <div class="btn-icon">⚡</div>
+              <div class="btn-label">Vaca Asustada</div>
+              <div class="btn-desc">Movimientos bruscos del acelerómetro.</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="flex-center gap-10">
+            <button class="btn btn-primary" onclick="toggleSimulation()" id="btn-sim-main">
+              <span id="sim-btn-inner">▶ Iniciar Movimiento Automático</span>
+            </button>
+            <span id="sim-status-label" class="text-xs text-muted">En pausa</span>
+          </div>
+        </div>
+
+        <!-- Inyector Manual para Profesores o Pruebas -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📡 Enviar Paquete Manual de Prueba</div>
+            <button class="btn btn-secondary btn-sm" onclick="sendManualUplink()">🚀 Enviar</button>
+          </div>
+          <p class="text-sm text-muted mb-8">
+            Simula un mensaje recibido desde el Gateway <strong>HT-M7603</strong>:
+          </p>
+          <textarea id="manual-json-input" class="code-box" style="width:100%; height:180px; resize:vertical;" spellcheck="false">{
+  "end_device_ids": { "device_id": "cow-01" },
+  "decoded_payload": {
+    "lat": -2.897109,
+    "lng": -78.994003,
+    "pitch": -36.4,
+    "roll": 2.1,
+    "motion": 0.42,
+    "batt_v": 3.97,
+    "batt_pct": 87,
+    "activity": "Pastando"
+  },
+  "rssi": -81,
+  "snr": 9.8,
+  "gateway_id": "heltec-htm7603-hacienda"
+}</textarea>
+          <div id="manual-send-status" class="text-xs mt-8"></div>
+        </div>
+
+      </div>
+    </div><!-- /tab-simulator -->
+
+  </main>
+
+  <!-- ═══════════════════════════════════════════════
+       BARRA DE NAVEGACIÓN INFERIOR PARA CELULARES
+       (Estilo app nativa, fácil acceso con el pulgar)
+       ═══════════════════════════════════════════════ -->
+  <nav class="mobile-bottom-nav" aria-label="Navegación inferior móvil">
+    <button class="mobile-nav-item active tab-btn" onclick="switchTab('tab-dashboard')">
+      <span class="nav-icon">🗺️</span>
+      <span class="nav-label">Potrero</span>
+    </button>
+    <button class="mobile-nav-item tab-btn" onclick="switchTab('tab-behavior')">
+      <span class="nav-icon">📊</span>
+      <span class="nav-label">Salud</span>
+    </button>
+    <button class="mobile-nav-item tab-btn" onclick="switchTab('tab-history')">
+      <span class="nav-icon">📋</span>
+      <span class="nav-label">Datos</span>
+    </button>
+    <button class="mobile-nav-item tab-btn" onclick="switchTab('tab-ttn')">
+      <span class="nav-icon">🛰️</span>
+      <span class="nav-label">Antena</span>
+    </button>
+    <button class="mobile-nav-item tab-btn" onclick="switchTab('tab-simulator')">
+      <span class="nav-icon">🧪</span>
+      <span class="nav-label">Pruebas</span>
+    </button>
+  </nav>
+
+  <!-- ═══════════════════════════════════════════════
+       PIE DE PÁGINA (Visible en computadoras)
+       ═══════════════════════════════════════════════ -->
+  <footer class="app-footer">
+    <div>
+      <strong>Cowlar v2.0</strong> — Sistema de Monitoreo Ganadero · UETS Ecuador
+    </div>
+    <div>
+      Heltec ESP32-S3 V4 + ADXL345 + GPS L76K · Gateway Heltec HT-M7603
+    </div>
+  </footer>
+
+  <!-- App Script -->
+  <script src="app.js"></script>
+</body>
+</html>

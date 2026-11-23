@@ -19,7 +19,24 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
 
 PORT = int(os.environ.get("PORT", 8000))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-STATIC_DIR = os.path.join(BASE_DIR, "static")
+
+def get_static_dir():
+    # 1. Buscar carpeta static estándar
+    cand1 = os.path.join(BASE_DIR, "static")
+    if os.path.exists(os.path.join(cand1, "index.html")):
+        return cand1
+    # 2. Buscar si index.html quedó suelto en la raíz del repositorio
+    if os.path.exists(os.path.join(BASE_DIR, "index.html")):
+        return BASE_DIR
+    # 3. Buscar en el directorio de trabajo actual (CWD)
+    cand3 = os.path.join(os.getcwd(), "static")
+    if os.path.exists(os.path.join(cand3, "index.html")):
+        return cand3
+    if os.path.exists(os.path.join(os.getcwd(), "index.html")):
+        return os.getcwd()
+    return cand1
+
+STATIC_DIR = get_static_dir()
 
 # Variable global para el gestor MQTT
 mqtt_mgr = None
@@ -185,7 +202,18 @@ def ingest_telemetry_payload(payload):
 
 class CowlarRequestHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=STATIC_DIR, **kwargs)
+        super().__init__(*args, directory=get_static_dir(), **kwargs)
+
+    def do_HEAD(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+        if path in ["/", "/index.html", "/healthz", "/style.css", "/app.js"]:
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        return super().do_HEAD()
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -333,7 +361,47 @@ class CowlarRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             return self.wfile.write(csv_content)
 
-        # Static fallback (handle both /style.css and /static/style.css)
+        # Manejo explícito de archivos estáticos para la nube (Render)
+        s_dir = get_static_dir()
+        if path in ["/", "/index.html"]:
+            idx_file = os.path.join(s_dir, "index.html")
+            if os.path.exists(idx_file):
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                with open(idx_file, 'rb') as f:
+                    content = f.read()
+                self.send_header('Content-Length', str(len(content)))
+                self.end_headers()
+                return self.wfile.write(content)
+            else:
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                html = """<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Cowlar</title><style>body{background:#0c120e;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;text-align:center;}div{background:#17201a;border:1px solid rgba(56,178,89,0.3);padding:30px;border-radius:14px;max-width:500px;}h2{color:#38b259;}p{color:#8ca493;line-height:1.6;}</style></head><body><div><h2>Servidor Cowlar Activo</h2><p>El servidor est&aacute; corriendo en Render, pero falta subir la carpeta <strong>static</strong> (con index.html, style.css y app.js) a tu repositorio de GitHub.</p></div></body></html>""".encode('utf-8')
+                self.send_header('Content-Length', str(len(html)))
+                self.end_headers()
+                return self.wfile.write(html)
+        elif path in ["/style.css", "/static/style.css"]:
+            css_file = os.path.join(s_dir, "style.css")
+            if os.path.exists(css_file):
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/css; charset=utf-8')
+                with open(css_file, 'rb') as f:
+                    content = f.read()
+                self.send_header('Content-Length', str(len(content)))
+                self.end_headers()
+                return self.wfile.write(content)
+        elif path in ["/app.js", "/static/app.js"]:
+            js_file = os.path.join(s_dir, "app.js")
+            if os.path.exists(js_file):
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/javascript; charset=utf-8')
+                with open(js_file, 'rb') as f:
+                    content = f.read()
+                self.send_header('Content-Length', str(len(content)))
+                self.end_headers()
+                return self.wfile.write(content)
+
+        # Static fallback
         if path.startswith("/static/"):
             self.path = path[7:]
         return super().do_GET()
